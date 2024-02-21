@@ -4,10 +4,12 @@ use humansize::{file_size_opts as options, FileSize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::io::{self, Write};
 
 #[derive(Debug)]
 struct FileInfo {
     name: String,
+    path: PathBuf,
     size: Option<u64>,
     modified: Option<i64>,
     is_dir: bool,
@@ -19,6 +21,7 @@ struct FileInfo {
 impl FileInfo {
     fn new(
         name: String,
+        path: PathBuf,
         size: Option<u64>,
         modified: Option<i64>,
         is_dir: bool,
@@ -28,6 +31,7 @@ impl FileInfo {
     ) -> Self {
         FileInfo {
             name,
+            path,
             size,
             modified,
             is_dir,
@@ -81,6 +85,7 @@ fn explore_directory(
             }
 
             let name = entry.file_name().to_string_lossy().to_string();
+            let path = entry.path();
             let size = metadata.len();
             let modified =
                 metadata.modified().ok()?.duration_since(std::time::SystemTime::UNIX_EPOCH).ok()?.as_secs() as i64;
@@ -89,7 +94,16 @@ fn explore_directory(
             let group = get_group(&metadata);
             let is_dir = metadata.is_dir();
 
-            files.push(FileInfo::new(name, Some(size), Some(modified), is_dir, permissions, owner, group));
+            files.push(FileInfo::new(
+                name,
+                path,
+                Some(size),
+                Some(modified),
+                is_dir,
+                permissions,
+                owner,
+                group,
+            ));
 
             if recursive && is_dir {
                 let subdir_path = Path::new(dir_path).join(entry.file_name());
@@ -100,14 +114,13 @@ fn explore_directory(
         }
     }
 
-    // Sorting
     match sort_by {
         "size" => files.sort_by(|a, b| a.size.unwrap_or(0).cmp(&b.size.unwrap_or(0))),
         "date" => files.sort_by(|a, b| a.modified.unwrap_or(0).cmp(&b.modified.unwrap_or(0))),
+        "path" => files.sort_by(|a, b| a.path.cmp(&b.path)),
         _ => files.sort_by(|a, b| a.name.cmp(&b.name)),
     }
 
-    // Filtering
     if let Some(extension) = filter_by {
         files.retain(|file| file.name.ends_with(extension));
     }
@@ -123,9 +136,7 @@ fn perform_file_operation(operation: &str, source: &str, destination: &str) {
         _ => return,
     };
 
-    let result = command.status();
-
-    if let Err(e) = result {
+    if let Err(e) = command.status() {
         handle_error(&format!("Failed to perform file operation: {}", e));
     }
 }
@@ -137,9 +148,7 @@ fn view_file(file_path: &str) {
         _ => return,
     };
 
-    let result = command.status();
-
-    if let Err(e) = result {
+    if let Err(e) = command.status() {
         handle_error(&format!("Failed to view file: {}", e));
     }
 }
@@ -152,17 +161,61 @@ fn edit_file(file_path: &str) {
         _ => return,
     };
 
-    let result = command.status();
-
-    if let Err(e) = result {
+    if let Err(e) = command.status() {
         handle_error(&format!("Failed to edit file: {}", e));
+    }
+}
+
+fn create_directory(directory_path: &str) {
+    if let Err(e) = fs::create_dir(directory_path) {
+        handle_error(&format!("Failed to create directory: {}", e));
+    }
+}
+
+fn rename_file(old_path: &str, new_name: &str) {
+    let new_path = Path::new(old_path).with_file_name(new_name);
+    if let Err(e) = fs::rename(old_path, &new_path) {
+        handle_error(&format!("Failed to rename file: {}", e));
+    }
+}
+
+fn print_file_content(file_path: &str) {
+    match fs::read_to_string(file_path) {
+        Ok(content) => println!("{}", content),
+        Err(e) => handle_error(&format!("Failed to read file content: {}", e)),
+    }
+}
+
+fn write_file_content(file_path: &str, content: &str) {
+    match fs::write(file_path, content) {
+        Ok(_) => println!("Content written to file successfully."),
+        Err(e) => handle_error(&format!("Failed to write to file: {}", e)),
+    }
+}
+
+fn search_file_content(file_path: &str, search_query: &str) {
+    match fs::read_to_string(file_path) {
+        Ok(content) => {
+            if content.contains(search_query) {
+                println!("Search query found in the file.");
+            } else {
+                println!("Search query not found in the file.");
+            }
+        }
+        Err(e) => handle_error(&format!("Failed to read file content: {}", e)),
+    }
+}
+
+fn execute_shell_command(command: &str) {
+    if let Err(e) = Command::new("sh").arg("-c").arg(command).status() {
+        handle_error(&format!("Failed to execute shell command: {}", e));
     }
 }
 
 fn main() {
     let matches = App::new("Rust File Explorer")
-        .version("1.0.1")
-        .author("Varnit21")
+        .version("1.0")
+        .author("Your Name")
         .about("A command-line file explorer in Rust")
         .arg(
             Arg::with_name("directory")
@@ -177,7 +230,7 @@ fn main() {
                 .short("s")
                 .long("sort")
                 .value_name("SORT")
-                .help("Sort files by name, size, or modification date")
+                .help("Sort files by name, size, modification date, or path")
                 .takes_value(true),
         )
         .arg(
@@ -240,6 +293,54 @@ fn main() {
                 .help("Edit the content of a file")
                 .takes_value(true),
         )
+        .arg(
+            Arg::with_name("create_dir")
+                .short("c")
+                .long("create")
+                .value_name("CREATE")
+                .help("Create a new directory")
+                .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("rename")
+                .short("rn")
+                .long("rename")
+                .value_name("RENAME")
+                .help("Rename a file or directory")
+                .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("content")
+                .short("cnt")
+                .long("content")
+                .value_name("CONTENT")
+                .help("Print content of a file")
+                .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("write_content")
+                .short("wc")
+                .long("write_content")
+                .value_name("WRITE_CONTENT")
+                .help("Write content to a file")
+                .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("search_content")
+                .short("sc")
+                .long("search_content")
+                .value_name("SEARCH_CONTENT")
+                .help("Search content in a file")
+                .takes_value(true),
+        )
+        .arg(
+            Arg::with_name("shell_command")
+                .short("sh")
+                .long("shell_command")
+                .value_name("SHELL_COMMAND")
+                .help("Execute a shell command")
+                .takes_value(true),
+        )
         .get_matches();
 
     if let Some(operation) = matches.value_of("operation") {
@@ -256,6 +357,38 @@ fn main() {
 
     if let Some(file_path) = matches.value_of("edit") {
         edit_file(file_path);
+        return;
+    }
+
+    if let Some(directory_path) = matches.value_of("create_dir") {
+        create_directory(directory_path);
+        return;
+    }
+
+    if let (Some(file_path), Some(new_name)) = (matches.value_of("rename"), matches.value_of("directory")) {
+        rename_file(file_path, new_name);
+        return;
+    }
+
+    if let Some(file_path) = matches.value_of("content") {
+        print_file_content(file_path);
+        return;
+    }
+
+    if let (Some(file_path), Some(content)) = (matches.value_of("write_content"), matches.value_of("content")) {
+        write_file_content(file_path, content);
+        return;
+    }
+
+    if let (Some(file_path), Some(search_query)) =
+        (matches.value_of("search_content"), matches.value_of("search_content"))
+    {
+        search_file_content(file_path, search_query);
+        return;
+    }
+
+    if let Some(shell_command) = matches.value_of("shell_command") {
+        execute_shell_command(shell_command);
         return;
     }
 
