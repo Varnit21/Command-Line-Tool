@@ -214,8 +214,8 @@ fn execute_shell_command(command: &str) {
 
 fn main() {
     let matches = App::new("Rust File Explorer")
-        .version("1.0")
-        .author("Your Name")
+        .version("1.1.0")
+        .author("Varnit21")
         .about("A command-line file explorer in Rust")
         .arg(
             Arg::with_name("directory")
