@@ -443,3 +443,18 @@ fn main() {
         );
     }
 }
+
+
+fn compress_files(files: Vec<&str>, output: &str) {
+    let command = Command::new("zip")
+        .arg("-r")
+        .arg(output)
+        .args(files)
+        .status();
+
+    if let Err(e) = command {
+        eprintln!("Error: Failed to compress files - {}", e);
+    } else {
+        println!("Files compressed successfully into {}", output);
+    }
+}
