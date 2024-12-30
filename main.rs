@@ -453,3 +453,14 @@ fn preview_file(file_path: &str, lines: usize) {
         eprintln!("Error: Could not preview the file.");
     }
 }
+
+fn search_files_by_name(dir_path: &str, query: &str, recursive: bool) -> Vec<FileInfo> {
+    let mut results = Vec::new();
+    let files = explore_directory(dir_path, true, "name", None, recursive);
+    for file in files {
+        if file.name.contains(query) {
+            results.push(file);
+        }
+    }
+    results
+}
